@@ -1,0 +1,8 @@
+{
+  "model_path": "models/russian_traffic_signs.pt",
+  "confidence_threshold": 0.25,
+  "iou_threshold": 0.45,
+  "device": "auto",
+  "window_width": 1400,
+  "window_height": 860
+}
