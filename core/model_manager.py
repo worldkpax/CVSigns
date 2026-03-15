@@ -22,6 +22,25 @@ class ModelManager:
         self.model: YOLO | None = None
         self.model_path: str | None = None
         self._class_names: dict[int, str] = {}
+        self._tile_inference_enabled = True
+        self._tile_size = 960
+        self._tile_overlap = 0.25
+        self._tile_min_side = 1200
+
+    def configure_tiling(
+        self,
+        enabled: bool,
+        tile_size: int,
+        tile_overlap: float,
+        tile_min_side: int,
+    ) -> None:
+        self._tile_inference_enabled = enabled
+        self._tile_size = max(tile_size, 64)
+        self._tile_overlap = min(max(tile_overlap, 0.0), 0.8)
+        self._tile_min_side = max(tile_min_side, self._tile_size)
+
+    def set_tiling_enabled(self, enabled: bool) -> None:
+        self._tile_inference_enabled = enabled
 
     def load_model(self, model_path: str) -> tuple[bool, str]:
         path = Path(model_path)
@@ -74,11 +93,55 @@ class ModelManager:
             raise RuntimeError("Модель не загружена.")
 
         resolved_device = self.resolve_device(device)
+        detections = self._predict_single(
+            frame=frame,
+            confidence_threshold=confidence_threshold,
+            iou_threshold=iou_threshold,
+            device=resolved_device,
+        )
+
+        if not self._should_use_tiling(frame):
+            return detections
+
+        tiled_detections: list[Detection] = []
+        for tile_frame, offset_x, offset_y in self._generate_tiles(frame):
+            for detection in self._predict_single(
+                frame=tile_frame,
+                confidence_threshold=confidence_threshold,
+                iou_threshold=iou_threshold,
+                device=resolved_device,
+            ):
+                tiled_detections.append(
+                    Detection(
+                        class_id=detection.class_id,
+                        class_name=detection.class_name,
+                        confidence=detection.confidence,
+                        bbox=(
+                            detection.bbox[0] + offset_x,
+                            detection.bbox[1] + offset_y,
+                            detection.bbox[2] + offset_x,
+                            detection.bbox[3] + offset_y,
+                        ),
+                    )
+                )
+
+        return self._deduplicate_detections(
+            detections + tiled_detections,
+            iou_threshold=max(iou_threshold, 0.5),
+        )
+
+    def _predict_single(
+        self,
+        frame: np.ndarray,
+        confidence_threshold: float,
+        iou_threshold: float,
+        device: str,
+    ) -> list[Detection]:
         results = self.model.predict(
             source=frame,
             conf=confidence_threshold,
             iou=iou_threshold,
-            device=resolved_device,
+            device=device,
             verbose=False,
         )
         if not results:
@@ -105,6 +168,99 @@ class ModelManager:
                 )
             )
         return detections
+
+    def _should_use_tiling(self, frame: np.ndarray) -> bool:
+        if not self._tile_inference_enabled:
+            return False
+        height, width = frame.shape[:2]
+        return max(height, width) >= self._tile_min_side
+
+    def _generate_tiles(
+        self, frame: np.ndarray
+    ) -> list[tuple[np.ndarray, int, int]]:
+        height, width = frame.shape[:2]
+        tile_size = min(self._tile_size, height, width)
+        if tile_size <= 0:
+            return []
+
+        stride = max(int(tile_size * (1.0 - self._tile_overlap)), 1)
+        y_positions = self._tile_positions(height, tile_size, stride)
+        x_positions = self._tile_positions(width, tile_size, stride)
+
+        tiles: list[tuple[np.ndarray, int, int]] = []
+        for top in y_positions:
+            for left in x_positions:
+                bottom = min(top + tile_size, height)
+                right = min(left + tile_size, width)
+                tile = frame[top:bottom, left:right]
+                if tile.size == 0:
+                    continue
+                tiles.append((tile, left, top))
+        return tiles
+
+    def _tile_positions(self, full_size: int, tile_size: int, stride: int) -> list[int]:
+        if full_size <= tile_size:
+            return [0]
+
+        positions = list(range(0, full_size - tile_size + 1, stride))
+        last_position = full_size - tile_size
+        if positions[-1] != last_position:
+            positions.append(last_position)
+        return positions
+
+    def _deduplicate_detections(
+        self, detections: list[Detection], iou_threshold: float
+    ) -> list[Detection]:
+        if len(detections) < 2:
+            return detections
+
+        kept: list[Detection] = []
+        grouped: dict[int, list[Detection]] = {}
+        for detection in detections:
+            grouped.setdefault(detection.class_id, []).append(detection)
+
+        for class_detections in grouped.values():
+            ordered = sorted(
+                class_detections,
+                key=lambda detection: detection.confidence,
+                reverse=True,
+            )
+            while ordered:
+                current = ordered.pop(0)
+                kept.append(current)
+                ordered = [
+                    candidate
+                    for candidate in ordered
+                    if self._bbox_iou(current.bbox, candidate.bbox) < iou_threshold
+                ]
+
+        return kept
+
+    def _bbox_iou(
+        self,
+        bbox_a: tuple[int, int, int, int],
+        bbox_b: tuple[int, int, int, int],
+    ) -> float:
+        ax1, ay1, ax2, ay2 = bbox_a
+        bx1, by1, bx2, by2 = bbox_b
+
+        inter_x1 = max(ax1, bx1)
+        inter_y1 = max(ay1, by1)
+        inter_x2 = min(ax2, bx2)
+        inter_y2 = min(ay2, by2)
+
+        inter_w = max(0, inter_x2 - inter_x1)
+        inter_h = max(0, inter_y2 - inter_y1)
+        intersection = inter_w * inter_h
+        if intersection == 0:
+            return 0.0
+
+        area_a = max(0, ax2 - ax1) * max(0, ay2 - ay1)
+        area_b = max(0, bx2 - bx1) * max(0, by2 - by1)
+        union = area_a + area_b - intersection
+        if union <= 0:
+            return 0.0
+        return intersection / union
 
     def get_class_name(self, class_id: int) -> str:
         return self._class_names.get(class_id, f"class_{class_id}")

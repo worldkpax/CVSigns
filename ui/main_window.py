@@ -123,11 +123,22 @@ class MainWindow(QMainWindow):
 
     def _start_worker(self) -> None:
         self.worker.start()
+        self.worker.configure_tiling(
+            enabled=self.settings.tile_inference_enabled,
+            tile_size=self.settings.tile_size,
+            tile_overlap=self.settings.tile_overlap,
+            tile_min_side=self.settings.tile_min_side,
+        )
         self.worker.set_thresholds(
             self.settings.confidence_threshold,
             self.settings.iou_threshold,
         )
         self.worker.set_device(self.settings.device)
+
+    def _sync_tiling_mode(self) -> None:
+        source_type = self.video_source.source_type
+        use_tiling = self.settings.tile_inference_enabled and source_type != "camera"
+        self.worker.set_tiling_enabled(use_tiling)
 
     def _attempt_initial_model_load(self) -> None:
         model_path = self.control_panel.model_path()
@@ -147,6 +158,7 @@ class MainWindow(QMainWindow):
     def _open_camera(self) -> None:
         self.stop_processing(silent=True)
         ok, message = self.video_source.open_camera(0)
+        self._sync_tiling_mode()
         self._set_status(message)
         self.control_panel.log_event(message)
         if ok:
@@ -167,6 +179,7 @@ class MainWindow(QMainWindow):
         if not file_path:
             return
         ok, message = self.video_source.open_video(file_path)
+        self._sync_tiling_mode()
         self._set_status(message)
         self.control_panel.log_event(message)
         if ok:
@@ -183,6 +196,7 @@ class MainWindow(QMainWindow):
         if not file_path:
             return
         ok, message = self.video_source.open_image(file_path)
+        self._sync_tiling_mode()
         self._set_status(message)
         self.control_panel.log_event(message)
         if ok:

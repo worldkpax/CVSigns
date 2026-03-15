@@ -84,6 +84,23 @@ class InferenceWorker(QThread):
         resolved = self._model_manager.resolve_device(device)
         self.status_message.emit(f"Устройство инференса: {resolved}")
 
+    def configure_tiling(
+        self,
+        enabled: bool,
+        tile_size: int,
+        tile_overlap: float,
+        tile_min_side: int,
+    ) -> None:
+        self._model_manager.configure_tiling(
+            enabled=enabled,
+            tile_size=tile_size,
+            tile_overlap=tile_overlap,
+            tile_min_side=tile_min_side,
+        )
+
+    def set_tiling_enabled(self, enabled: bool) -> None:
+        self._model_manager.set_tiling_enabled(enabled)
+
     def set_active(self, active: bool, emit_status: bool = True) -> None:
         self._active = active
         if emit_status:

@@ -11,6 +11,10 @@ class AppSettings:
     confidence_threshold: float = 0.25
     iou_threshold: float = 0.45
     device: str = "auto"
+    tile_inference_enabled: bool = True
+    tile_size: int = 960
+    tile_overlap: float = 0.25
+    tile_min_side: int = 1200
     window_width: int = 1400
     window_height: int = 860
 
