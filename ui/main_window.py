@@ -206,10 +206,11 @@ class MainWindow(QMainWindow):
 
     def start_processing(self) -> None:
         if not self._last_model_ok:
+            expected_model_path = self.settings.model_path or "models/best.pt"
             self._show_error(
                 "Модель не загружена",
                 "Файл модели отсутствует или не был загружен. Поместите веса в "
-                "`models/rtsd_yolo12n_640_quick.pt` или выберите `.pt` файл вручную.",
+                f"`{expected_model_path}` или выберите `.pt` файл вручную.",
             )
             return
 

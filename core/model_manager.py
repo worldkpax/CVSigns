@@ -8,6 +8,8 @@ import numpy as np
 import torch
 from ultralytics import YOLO
 
+from core.rtsd_labels import RTSD_CLASS_CODES, resolve_rtsd_sign_name
+
 
 @dataclass(slots=True)
 class Detection:
@@ -275,13 +277,26 @@ class ModelManager:
                 except (TypeError, ValueError):
                     continue
                 label = str(value).strip() if value is not None else ""
-                normalized[class_id] = label or f"class_{class_id}"
+                normalized[class_id] = (
+                    resolve_rtsd_sign_name(label, class_id) or label or f"class_{class_id}"
+                )
             return normalized
 
         if isinstance(names, (list, tuple)):
             return {
-                index: (str(value).strip() if str(value).strip() else f"class_{index}")
+                index: (
+                    resolve_rtsd_sign_name(str(value), index)
+                    or str(value).strip()
+                    or f"class_{index}"
+                )
                 for index, value in enumerate(names)
             }
 
-        return {}
+        return {
+            class_id: class_name
+            for class_id, class_name in (
+                (index, resolve_rtsd_sign_name(None, index))
+                for index in range(len(RTSD_CLASS_CODES))
+            )
+            if class_name is not None
+        }

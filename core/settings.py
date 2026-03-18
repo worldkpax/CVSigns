@@ -7,7 +7,7 @@ from pathlib import Path
 
 @dataclass(slots=True)
 class AppSettings:
-    model_path: str = "models/rtsd_yolo12n_640_quick.pt"
+    model_path: str = "models/best.pt"
     confidence_threshold: float = 0.25
     iou_threshold: float = 0.45
     device: str = "auto"
